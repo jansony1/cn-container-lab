@@ -16,12 +16,12 @@ git clone https://github.com/jansony1/cn-container-lab.git
 cd cn-container-lab/lb-controller
 ```
 
-* enable oidc on eks
+* Enable oidc on eks, replace **<Cluster-Name> ** with **your cluster name**
 
 ```
 eksctl utils associate-iam-oidc-provider \
     --region cn-northwest-1 \
-    --cluster test-eks-1 \
+    --cluster <Cluster-Name> \
     --approve
 ```
 
