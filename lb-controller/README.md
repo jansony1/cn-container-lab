@@ -83,6 +83,14 @@ sed -i "s/<Cluster-Name>/<Your-cluster-name>/g" lb-controller-v2.yaml
 kubectl apply -f lb-controller-v2.yaml
 ```
 
+* Validation
+
+```
+[ec2-user@ip-10-0-1-58 lb-controller]$ kubectl get pods -nkube-system
+NAME                                            READY   STATUS    RESTARTS   AGE
+aws-load-balancer-controller-55867dddcf-lw47x   1/1     Running   0          17s
+```
+
 #### Install  2048 example
 
 * Install [2048 Game](https://docs.amazonaws.cn/en_us/eks/latest/userguide/alb-ingress.html)
