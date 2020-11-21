@@ -16,7 +16,7 @@ git clone https://github.com/jansony1/cn-container-lab.git
 cd cn-container-lab/lb-controller
 ```
 
-* Enable oidc on eks, replace **\<Cluster-Name>**with **your cluster name**
+* Enable oidc on eks, replace **\<Cluster-Name>** with **your cluster name**
 
 ```
 eksctl utils associate-iam-oidc-provider \
@@ -33,7 +33,7 @@ aws iam create-policy \
     --policy-document file://iam-policy-cn.json
 ```
 
-* Create serviceAccount and its mapping to iam role，replace**\<Cluster name>** and **<account_id>**
+* Create serviceAccount and its mapping to iam role，replace**\<Cluster name\>** and **<account_id>**
 
 ```
 eksctl create iamserviceaccount \
