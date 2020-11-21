@@ -4,6 +4,7 @@
 
 1. Kubernets version >= 1.17
 2. Enough right to provision required resource(**To be continued**)
+3. Enough node IAM role to get ECR image 
 
 ## Step by Step Introduction
 
@@ -49,7 +50,7 @@ eksctl create iamserviceaccount \
 * Modify image repo to [NWCD mirror](https://github.com/nwcdlabs/container-mirror)
 
 ```
-sed -i "s#quay.io#048912060910.dkr.ecr.cn-northwest-1.amazonaws.com.cn/gcr#g" cert-manager.yaml
+sed -i "s#quay.io#048912060910.dkr.ecr.cn-northwest-1.amazonaws.com.cn/quay#g" cert-manager.yaml
 ```
 
 * Install 
