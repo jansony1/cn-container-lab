@@ -1,0 +1,32 @@
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+
+metadata:
+  name: test-eks-2
+  region: cn-northwest-1
+
+vpc:
+  id: "vpc-0bf503eee271e473d"  # (optional, must match VPC ID used for each subnet below)
+  subnets:
+    private:
+      cn-northwest-pub-1a-1:
+        id: "subnet-0c1e786c060068219"
+      cn-northwest-pub-1a-2:
+        id: "subnet-05429b4465ef58ddf"  
+      cn-northwest-pub-1b-1:
+        id: "subnet-025c0791387ea3a13"
+    public:
+      cn-northwest-pri-1a-1:
+        id: "subnet-0e3001166fb09dd29"
+      cn-northwest-pri-1b-1:
+        id: "subnet-07975d675f5933adf"
+
+
+nodeGroups:
+  - name: ng-public
+    instanceType: m5.large
+    desiredCapacity: 2
+    privateNetworking: true # if only 'Private' subnets are given, this must be enabled
+    subnets: ["cn-northwest-pub-1b-1","cn-northwest-pub-1a-1"]
+    ssh:
+      publicKeyPath: ~/.ssh/id_rsa.pub
