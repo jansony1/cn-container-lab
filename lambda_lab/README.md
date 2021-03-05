@@ -12,7 +12,7 @@
 
 1. 创建对应lambda所使用的IAM role
 
-   需要给对应lambda函数执行修改acl的操作，以及写cloudwatch从而进行排错的权限；具体为首先编写如下的IAM policy，其中**bucket-name** 替换为视频需要上传的s3 bucket名字
+   需要给对应lambda函数执行修改acl的操作，以及写cloudwatch从而进行排错的权限；具体为首先编写如下的IAM policy，其中 **bucket-name** 替换为视频需要上传的s3 bucket名字
 
    ```
    {
