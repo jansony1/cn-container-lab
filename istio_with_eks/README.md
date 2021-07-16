@@ -20,13 +20,29 @@
 
 默认情况下Istio安装时，会安装Istio-ingressgateway，本质上为一个Service+deployment，其中Service类型为AWS CLB，Deployment为纯的envoy agent，其结合对应的virtual service进行对应**Mesh内**的流量分发，具体的逻辑关系图可以参考下图1和图2.
 
-![](./istio-gateway.png)
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="./istio-gateway.png">
+    <br>
+    <div style="color:orange; border-bottom: 1px solid #d9d9d9;
+    display: inline-block;
+    color: #999;
+    padding: 2px;">图1:映射图</div>
+</center>
 
-<center>图1:逻辑映射</center>
 
-![](./gateway.png)
 
-<center>图2:架构图</center>
+<center>
+    <img style="border-radius: 0.3125em;
+    box-shadow: 0 2px 4px 0 rgba(34,36,38,.12),0 2px 10px 0 rgba(34,36,38,.08);" 
+    src="./gateway.png">
+    <br>
+    <div style="color:orange; border-bottom: 1px solid #d9d9d9;
+    display: inline-block;
+    color: #999;
+    padding: 2px;">图2:架构图</div>
+</center>
 
 
 
