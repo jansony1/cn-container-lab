@@ -1,4 +1,4 @@
-## 用AWS NLB和ALB替换Istio ingressgateway默认CLB
+# 用AWS NLB和ALB替换Istio ingressgateway默认CLB
 
 ### 介绍
 
