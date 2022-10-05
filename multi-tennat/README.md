@@ -6,11 +6,11 @@
 
 如果选择不同的集群对应不同的应用(如下图所示)，这种独占（dedicated）的模式可以有效避免吵闹的邻居问题，另外从运维角度来说可以相对简化集群内运维和策略的复杂度。但是同时其也带来了很多挑战，比如如何确定切分应用的粒度，如何对多集群进行运维管理，如何更高的提高每个集群的利用率，如何处理跨集群应用调用以及相应的链路追踪等等。
 
-<img src="/Users/zhenyin/Desktop/AWS/aws/program/cn-container-lab/multi-tennat/image/dedicated.png" style="zoom:50%;" />
+<img src="../multi-tennat/image/dedicated.png" style="zoom:50%;" />
 
 如果基于单集群多namespace的角度来看（如下图），首先感谢Amazon EKS[最近的升级](https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/)， EKS控制平面现在有了基于集群指标，如Cluster Size，等的自动扩容机制，目前EKS单集群可以支持多达数千个以上的工作节点。基于此，单一集群便可支撑客户较大规模的应用部署，同时在运维角度，单一集群的管理也相对更为简单。但是，由于多应用存在于同一集群，namespace级别的隔离又是软限制，我们需要实施很多集群内的租户隔离措施，如基于namespace的网络策略，基于节点的资源隔离措施，还需要考虑集群升级等变动发生时对于不同应用部门协调所需要的额外工作量等等。
 
-<img src="/Users/zhenyin/Desktop/AWS/aws/program/cn-container-lab/multi-tennat/image/shared.png" style="zoom:50%;" />
+<img src="../multi-tennat/image/shared.png" style="zoom:50%;" />
 
 在Amazon EKS上，控制平面由AWS进行托管，基于职责分离的原则，用户更需要关注的为工作节点和相关网络的管理。因为独占模式相对简单，网络隔离会在后续的文章专门探讨，本文主要探讨的话题集中在如何在**单集群多namespace的情况下实现集群工作节点的合理且安全的利用**
 
@@ -637,7 +637,7 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 最后，附上相关的总结
 
-<img src="/Users/zhenyin/Desktop/AWS/aws/program/cn-container-lab/multi-tennat/image/summary.png" style="zoom:50%;" />
+<img src="../multi-tennat/image/summary.png" style="zoom:50%;" />
 
 ### 参考文档
 
