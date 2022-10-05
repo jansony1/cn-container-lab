@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment-kpt
+  labels:
+    app/team: application-a
+  namespace: namespace-a
+spec:
+  replicas: 
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      tolerations:
+        - key: app/team
+          operator: "Equal"
+          value: "application-a"
+          effect: "NoSchedule"
+      nodeSelector:
+        app/team: application-a
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            memory: "2048Mi"
+            cpu: "1500m"
+          limits:
+            memory: "2048Mi"
+            cpu: "1500m"
