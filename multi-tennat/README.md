@@ -409,7 +409,7 @@ metadata:
   namespace: namespace-a
 spec:
   replicas: 5
-  ```
+   ...
     spec:
       nodeSelector:
         app/team: application-a
@@ -419,7 +419,7 @@ spec:
           value: "application-a"
           effect: "NoSchedule"
       containers:
-        ```
+        ...
         resources:
           requests:
             memory: "2048Mi"
@@ -600,12 +600,12 @@ namespace-a         nginx-deployment-no-selector-6f7fdfd875-zk9hd   0/1     Pend
 
 查看pod， 发现selector已经注入成功
 
-````
+```
 [ec2-user@ip-10-1-1-239 ~]$ kubectl describe pods nginx-deployment-no-selector-6f7fdfd875-2n8hd -nnamespace-a
-```
+...
 Node-Selectors:              app/team=application-a
+...
 ```
-````
 
 稍等片刻，发现pod已经全部ready，并且全部落在了provioner-a生成的新节点上。
 
