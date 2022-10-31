@@ -1,20 +1,39 @@
-## 窝塌之下可容他人酣睡 一 EKS多租户集群节点管理浅谈
+## 窝塌之下可容他人酣睡 一 EKS多租户管理浅谈之计算资源篇
 
 ### 1.前言
 
-现如今，随着用户对于容器化掌握的越来越成熟，越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选平台。这个时候，经常会有一个问题摆在用户的面前：是应该对于不同的业务应用提供不同的集群，还是基于kubernetes原生的namespaces进行划分？
+现如今，随着用户对于容器化掌握的越来越成熟，越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选平台。这个时候，经常会有一个问题摆在用户的面前：为了保障各个应用都能够稳定的运行，该应用什么样的隔离保障措施，以及都有什么样的资源需要进行隔离？首先，从整体上来说，kubernetes本身不存在多租户相关的内置对象，不过其生态中存在着两种可以采用的多租户配置
 
-如果选择不同的集群对应不同的应用(如下图所示)，这种独占（dedicated）的模式可以有效避免吵闹的邻居问题，另外从运维角度来说可以相对简化集群内运维和策略的复杂度。但是同时其也带来了很多挑战，比如如何确定切分应用的粒度，如何对多集群进行运维管理，如何更高的提高每个集群的利用率，如何处理跨集群应用调用以及相应的链路追踪等等。
+* “软”租户：即多个应用运行在同一个集群，利用namespace即相关策略进行资源隔离
+  * 优点：
+    * EKS单集群可支撑上千节点的工作负载，单集群可减少多控制平面的花费
+    * 资源利用率相对较高
+  * 缺点：
+    * 需要考虑集群内的各种资源隔离的配置
+    * 需要考虑单集群运维对各个应用团队的影响
+* “硬”租户：即不同的应用运行在不同的集群之中，甚至不同的vpc之中，实现“物理”意义上的隔离
+  * 优点：
+    * 没有吵闹的邻居影响
+    * 不需要配置复杂的集群内策略
+  * 缺点：
+    * 控制平面会产生额外的花费
+    * 需要设计集群切分的粒度
+    * 资源利用率相对较低
+    * 跨集群访问和相应的监控较为复杂
 
-<img src="../multi-tennat/image/dedicated.png" style="zoom:50%;" />
+对于“硬”租户来说，默认情况下，其在网络层面，计算资源等层面都是默认“物理”隔离，在kubernetes层面并不需要太多关注。对于“软”租户来说，应用处于同一集群之中，计算资源，网络资源，存储资源等默认都是可通可达的，那么如何利用云原生和AWS服务处理“软”隔离便是本系列的探讨重点。对于“软”租户策略来说，其主要包含以下需要关注的点
+* 计算资源隔离
+* 网络隔离
+* 存储隔离
+* 服务等级（SLA）
+* 租户计费
+* 其他
 
-如果基于单集群多namespace的角度来看（如下图），首先感谢Amazon EKS[最近的升级](https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/)， EKS控制平面现在有了基于集群指标，如Cluster Size，等的自动扩容机制，目前EKS单集群可以支持多达数千个以上的工作节点。基于此，单一集群便可支撑客户较大规模的应用部署，同时在运维角度，单一集群的管理也相对更为简单。但是，由于多应用存在于同一集群，namespace级别的隔离又是软限制，我们需要实施很多集群内的租户隔离措施，如基于namespace的网络策略，基于节点的资源隔离措施，还需要考虑集群升级等变动发生时对于不同应用部门协调所需要的额外工作量等等。
-
-<img src="../multi-tennat/image/shared.png" style="zoom:50%;" />
-
-在Amazon EKS上，控制平面由AWS进行托管，基于职责分离的原则，用户更需要关注的为工作节点和相关网络的管理。因为独占模式相对简单，网络隔离会在后续的文章专门探讨，本文主要探讨的话题集中在如何在**单集群多namespace的情况下实现集群工作节点的合理且安全的利用**
+在本文中主要集中对于“软”租户的策略下计算资源隔离的讨论，其他内容会在后续的文章进行展开
 
 ### 2. 方案概述
+
+考虑计算资源隔离，其主要涉及的内容为：Namespace隔离，ServiceAccount细分以及对应资源的隔离。对应于以上考量点，我们主要分为如下两个场景进行展开讨论。
 
 #### 2.1 场景1：流量稳定，不涉及到工作节点的自动伸缩
 
@@ -92,7 +111,7 @@ managedNodeGroups:
   - name: application-a-ng
     type: m5.2xlarge
     tags:
-    	app/team: application-b
+     app/team: application-b
 
 ```
 
@@ -116,7 +135,7 @@ kind: Pod
 ```
 spec:
   containers:
-	```
+ ```
   tolerations:
   - key: "app/team"
     operator: "Equal"
@@ -124,7 +143,7 @@ spec:
     effect: "NoSchedule"
 ````
 
-在eksctl中也有通过脚本统一为nodegroup中节点打标签的配置，可[参考](https://eksctl.io/usage/nodegroup-taints/)。 
+在eksctl中也有通过脚本统一为nodegroup中节点打标签的配置，可[参考](https://eksctl.io/usage/nodegroup-taints/)。
 
 #### 2.2 场景2:  流量不稳定，涉及到节点的自动伸缩
 
@@ -178,7 +197,7 @@ spec:
 
       * 其本质跟基于CA的定向扩展原理相同，不同的provisioner对应不同的资源池，应用通过亲和性标签从而触发对应资源池的扩展。
 
-    * 单provisioner模式 (https://karpenter.sh/v0.16.3/tasks/scheduling/)
+    * 单provisioner模式 (<https://karpenter.sh/v0.16.3/tasks/scheduling/>)
 
       * 只需要在provioner配置类似如下的标签
 
@@ -318,7 +337,7 @@ spec:
                 - application-b
 ```
 
-> 需要注意的是，默认情况下基于nodegroup自动发现的逻辑，CA只会调整ASG中desired的机器数量 ，会遵循nodegroup配置的min和max；所以如果我们没有在创建nodegroup显示配置的话，那这这一步pod的启动会被卡住。 
+> 需要注意的是，默认情况下基于nodegroup自动发现的逻辑，CA只会调整ASG中desired的机器数量 ，会遵循nodegroup配置的min和max；所以如果我们没有在创建nodegroup显示配置的话，那这这一步pod的启动会被卡住。
 
 查看对应的pod状况
 
@@ -365,7 +384,7 @@ kubectl delete deployment nginx-deployment -nnamespace-b
 制作provisioner，本环节将会分别生成application-a-provisioner和application-b-provisioner，分别负责应用a和应用b的计算资源需求。执行下述操作生成provisioner，注意在执行前把**${CLUSTER_NAME}**换成自己的
 
 ```
-$ kubectl apply -f multi-tenant/yaml/provisioner/
+kubectl apply -f multi-tenant/yaml/provisioner/
 ```
 
 我们可以看到对应的两个provisioner已经生成
@@ -432,7 +451,7 @@ spec:
 执行部署
 
 ```
-$ kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-kpt.yaml
+kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-kpt.yaml
 ```
 
 观察执行结果
@@ -450,14 +469,14 @@ nginx-deployment-kpt-585c679d5d-p54h5   1/1     Running   0          96s
 可以看到，所有pod在100s内完成了就绪，查看karpenter的日志，我们发现其遍历了多个provisioner，并从中选择了匹配的provisioner-a，且**自动合并**了我们多个pod请求，从而在列表中选择了较大的机型进行启动，避免了多次调用AWS API，以及时间的消耗。
 
 ```
-2022-10-04T07:12:17.207Z	INFO	controller.provisioning	Found 3 provisionable pod(s)	{"commit": "5d4ae35-dirty"}
-2022-10-04T07:12:17.207Z	INFO	controller.provisioning	Computed 1 new node(s) will fit 3 pod(s)	{"commit": "5d4ae35-dirty"}
-2022-10-04T07:12:17.207Z	INFO	controller.provisioning	Launching node with 3 pods requesting {"cpu":"4594m","memory":"6Gi","pods":"6"} from types m5.2xlarge	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.389Z	DEBUG	controller.provisioning.cloudprovider	Discovered security groups: [sg-049758300817976ce]	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.393Z	DEBUG	controller.provisioning.cloudprovider	Discovered kubernetes version 1.23	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.428Z	DEBUG	controller.provisioning.cloudprovider	Discovered ami-050d93f2ea83da19d for query "/aws/service/eks/optimized-ami/1.23/amazon-linux-2/recommended/image_id"	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.588Z	DEBUG	controller.provisioning.cloudprovider	Created launch template, Karpenter-test-eks-1-4579713353214019755	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:20.650Z	INFO	controller.provisioning.cloudprovider	Launched instance: i-035a7efc520610dc7, hostname: ip-10-1-4-148.us-west-2.compute.internal, type: m5.2xlarge, zone: us-west-2a, capacityType: on-demand	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.207Z INFO controller.provisioning Found 3 provisionable pod(s) {"commit": "5d4ae35-dirty"}
+2022-10-04T07:12:17.207Z INFO controller.provisioning Computed 1 new node(s) will fit 3 pod(s) {"commit": "5d4ae35-dirty"}
+2022-10-04T07:12:17.207Z INFO controller.provisioning Launching node with 3 pods requesting {"cpu":"4594m","memory":"6Gi","pods":"6"} from types m5.2xlarge {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.389Z DEBUG controller.provisioning.cloudprovider Discovered security groups: [sg-049758300817976ce] {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.393Z DEBUG controller.provisioning.cloudprovider Discovered kubernetes version 1.23 {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.428Z DEBUG controller.provisioning.cloudprovider Discovered ami-050d93f2ea83da19d for query "/aws/service/eks/optimized-ami/1.23/amazon-linux-2/recommended/image_id" {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.588Z DEBUG controller.provisioning.cloudprovider Created launch template, Karpenter-test-eks-1-4579713353214019755 {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:20.650Z INFO controller.provisioning.cloudprovider Launched instance: i-035a7efc520610dc7, hostname: ip-10-1-4-148.us-west-2.compute.internal, type: m5.2xlarge, zone: us-west-2a, capacityType: on-demand {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
 ```
 
 #### 3.3 利用Gatekeeper实现namespace级别的管控和注入
@@ -487,7 +506,7 @@ gatekeeper-system   gatekeeper-controller-manager-dcb9c7fff-nxmn6   1/1     Runn
 安装插件
 
 ```
-$ kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-library/master/library/general/containerrequests/template.yaml
+kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-library/master/library/general/containerrequests/template.yaml
 ```
 
 部署策略
@@ -512,7 +531,7 @@ EOF
 其中限制了部署应用必须显示指定request值以及相应的最大值，否则部署出错。 接下来部署测试应用
 
 ```
-$ kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-no-request.yaml
+kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-no-request.yaml
 ```
 
 查看状态
@@ -532,11 +551,11 @@ $ kubectl logs gatekeeper-controller-manager-dcb9c7fff-nxmn6 -ngatekeeper-system
 ````
 resources:
   requests:
-  	memory: "2048Mi"
-  	cpu: "1500m"
+   memory: "2048Mi"
+   cpu: "1500m"
   limits:
-  	memory: "2048Mi"
-  	cpu: "1500m"
+   memory: "2048Mi"
+   cpu: "1500m"
 ````
 
 重新部署，发现容器启动正常
@@ -577,14 +596,14 @@ spec:
 EOF
 ```
 
-其中写明了，如果是部署在namespace-a的应用，那么会通过webhook注入如下的标签, 当然也可以注入其他选项，如toleration等。 
+其中写明了，如果是部署在namespace-a的应用，那么会通过webhook注入如下的标签, 当然也可以注入其他选项，如toleration等。
 
 ```
 nodeSelector
-	app/team: "application-a"
+ app/team: "application-a"
 ```
 
-部署应用 
+部署应用
 
 ```
 ## 发现除了三个跑在已有application-a-ng上的pod启动外，其他pod因为注入了selector无法调度
@@ -631,9 +650,9 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 ### 4. 总结
 
-#### 通过以上的方案的展开，我们了解到了在单集群多namespace环境下实现租户之间资源的隔离的几种常见划分和对应手段，其可以为客户在制定对应策略时提供基本的参考。
+通过以上的方案的展开，我们了解到了在单集群多namespace环境下实现租户之间资源的隔离的几种常见划分和对应手段，其可以为客户在制定对应策略时提供基本的参考
 
-##### 同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到了很多进入多租户深水区的客户往往采用了上述两种方式的结合，他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace 的形态进行划分，然后在进行逐步的演进。
+同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到了很多进入多租户深水区的客户往往采用了上述两种方式的结合，他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace 的形态进行划分，然后在进行逐步的演进
 
 最后，附上相关的总结
 
@@ -641,17 +660,10 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 ### 参考文档
 
-EKS enhancement: https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/
+EKS enhancement: <https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/>
 
-Cluster Autoscaler: https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-are-expanders
+Cluster Autoscaler: <https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-are-expanders>
 
-Karpenter： https://karpenter.sh/v0.16.3/tasks/scheduling/
+Karpenter： <https://karpenter.sh/v0.16.3/tasks/scheduling/>
 
-Gatekeeper：https://github.com/open-policy-agent/gatekeeper
-
-
-
-
-
-
-
+Gatekeeper：<https://github.com/open-policy-agent/gatekeeper>

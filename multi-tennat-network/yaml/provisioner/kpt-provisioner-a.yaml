@@ -1,0 +1,23 @@
+apiVersion: karpenter.sh/v1alpha5
+kind: Provisioner
+metadata:
+  name: application-a-provisioner
+spec:
+  requirements:
+   - key: node.kubernetes.io/instance-type
+     operator: In
+     values: ["m5.large", "m5.2xlarge"]
+  taints:
+    - key: app/team
+      value: application-a
+      effect: NoSchedule
+  labels:
+    app/team: application-a
+  
+  ttlSecondsAfterEmpty: 600
+  provider:
+    subnetSelector:
+      karpenter.sh/discovery: ${CLUSTER_NAME}
+    securityGroupSelector:
+      karpenter.sh/discovery: ${CLUSTER_NAME}
+    instanceProfile: KarpenterNodeInstanceProfile-${CLUSTER_NAME}
