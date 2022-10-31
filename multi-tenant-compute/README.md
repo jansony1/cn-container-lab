@@ -4,7 +4,7 @@
 
 现如今，随着用户对于容器化掌握的越来越成熟，越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选平台。这个时候，经常会有一个问题摆在用户的面前：为了保障各个应用都能够稳定的运行，该应用什么样的隔离保障措施，以及都有什么样的资源需要进行隔离？首先，从整体上来说，kubernetes本身不存在多租户相关的内置对象，不过其生态中存在着两种可以采用的多租户配置, 如下图所示
 
-### <img src="../multi-tennat/image/mode.png" style="zoom:50%;" />
+### <img src="../multi-tenant-compute/image/mode.png" style="zoom:50%;" />
 
 * “软”租户（上图左）：即多个应用运行在同一个集群，利用namespace即相关策略进行资源隔离
   * 优点：
@@ -659,7 +659,7 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 最后，附上相关的总结
 
-### <img src="../multi-tennat/image/summary.png" style="zoom:50%;" />
+### <img src="../multi-tenant/image/summary.png" style="zoom:50%;" />
 
 ### 参考文档
 
