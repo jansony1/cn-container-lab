@@ -17,7 +17,7 @@
 * “硬”隔离（上图右）：即不同的应用运行在不同的集群之中，甚至不同的vpc之中，实现“物理”意义上的隔离
   * 优点：
     * 没有吵闹的邻居影响
-    * 不需要配置复杂的集群内策略
+    * 不需要配置复杂的集群内策略https://quip-amazon.com/HD2TAPUEE6kB/Hudi-Issue-Track
   * 缺点：
     * 控制平面会产生额外的花费
     * 需要设计集群切分的粒度
@@ -661,7 +661,7 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 最后，附上相关的总结
 
-### <img src="../multi-tenant/image/summary.png" style="zoom:50%;" />
+### <img src="../multi-tenant-compute/image/summary.png" style="zoom:50%;" />
 
 在后续的文章中，我们将会从网络，存储，以及框架等方面展开近一步的探讨。
 
