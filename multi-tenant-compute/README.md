@@ -663,7 +663,7 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 ### <img src="../multi-tenant/image/summary.png" style="zoom:50%;" />
 
-在后续的文章中，我们将会从网络，存储，以及框架方面等展开近一步的探讨。
+在后续的文章中，我们将会从网络，存储，以及框架等方面展开近一步的探讨。
 
 ### 参考文档
 
