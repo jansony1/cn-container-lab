@@ -659,9 +659,15 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到很多进入多租户深水区的客户往往采用了上述两种方式的结合，即他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace的形态进行划分，然后在进行逐步的演进
 
-最后，附上相关的总结
+最后，附上相关内容的简要总结
 
 ### <img src="../multi-tenant-compute/image/summary.png" style="zoom:50%;" />
+
+上图缩写说明
+* NS: namespace
+* NG: nodegroup
+* KPT: karpenter
+* CA: cluster autoscaler
 
 在后续的文章中，我们将会从网络，存储，以及框架等方面展开近一步的探讨。
 
