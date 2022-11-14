@@ -2,7 +2,7 @@
 
 ### 1.前言
 
-现如今，随着用户对于容器化掌握的越来越成熟，相应的越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选支撑平台。在实际走访中，对于Infra或者容器平台的责任人来说，经常会有一个问题被反复探讨：为了保障各个应用都能够稳定的运行，该应用什么样的隔离保障措施，都有什么样的资源需要进行隔离，相应的优劣势是什么？从整体上来说，EKS/Kubernetes本身不存在多租户相关的内置对象，不过其生态中存在着两种可以采用的隔离措施从而达到多租户的效果, 其简单的示意图如下所示：
+现如今，随着用户对于容器化技术掌握的越来越成熟，相应的越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选支撑平台。在实际走访中发现，对于Infra或者容器平台的责任人来说，有一类问题经常会被反复探讨：为了保障各个应用都能够稳定的运行，该应用什么样的隔离保障措施，都有什么样的资源需要进行隔离，相应的优劣势是什么？从整体上来说，EKS/Kubernetes本身不存在多租户相关的内置资源对象，不过其生态中存在着两种可以采用的隔离措施，借助这些隔离措施可以实现多租户的效果, 其简单的示意图如下所示：
 
 ### <img src="../multi-tenant-compute/image/mode.png" style="zoom:50%;" />
 
@@ -12,7 +12,7 @@
     * 资源利用率相对较高
     * 省去了多集群管理的复杂工作
   * 缺点：
-    * 需要考虑集群内的各种资源隔离的配置
+    * 需要考虑集群内各种资源隔离的配置
     * 需要考虑单集群运维对各个应用团队的影响
 * “硬”隔离（上图右）：即不同的应用运行在不同的集群之中，甚至不同的vpc之中，实现“物理”意义上的隔离
   * 优点：
@@ -34,7 +34,7 @@
 * 不同
 * 其他
 
-在本文中主要集中对于“软”隔离的策略下计算资源隔离的讨论，其他内容会在后续的文章进行展开
+在本文中主要集中对于“软”隔离策略下计算资源隔离的讨论，其他内容会在后续的文章进行展开
 
 ### 2. 方案概述
 
@@ -42,7 +42,7 @@
 
 #### 2.1 场景1：负载稳定，不涉及到工作节点的自动伸缩
 
-对于企业内部应用或者负载较为平稳的应用来说，基于隔离的程度不同，通常情况下我们采用的策略为两种
+对于企业内部应用或者负载较为平稳的应用来说，对隔离程度的需求不同，通常情况下我们采用的策略为两种
 
 1. namespace级别的资源限制
 2. 指定工作节点+namespace级别的资源限制
@@ -51,7 +51,7 @@
 
 可以根据各个应用部门申请的资源额度，设置对应namespace的资源限额（Quota）。然后统计出集群中整体对于资源的申请情况，从而确定集群工作节点所需要的数量。配置如下：
 
-```
+```yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -64,13 +64,13 @@ spec:
     limits.memory: 2Gi
 ```
 
-如果需要把对应的Quota应用到指定的Namespace只需要，`kubectl xx.yaml --namespace = target-namespace`即可。其中在示例中，大家可以看到limit的值是request的值的两倍，这样设置是为了让集群内的资源利用更高，客户可以根据自身的波动情况进行对应改造。
+如果需要把对应的Quota应用到指定的Namespace只需要，`kubectl xx.yaml --namespace = target-namespace`即可。在示例中，大家可以看到limit的值是request的值的两倍，这样设置是为了让集群内的资源利用更高，客户可以根据自身的波动情况进行对应改造。
 
 ##### 方案2
 
-相对于方案1来说，我们需要为不同的业务应用做资源隔离，也就是创建不同的nodegroup。这时候计算集群内对于计算资源的需求时，使得不同namespace的Quota和对应nodegroup的资源匹配即可。 比如，application-a 需要 8core16g的资源，application-b 需要 8core32g的资源那么对应的ResourceQuota 可以分别配置成如下。
+相对于方案1来说，我们需要为不同的业务应用做资源隔离，也就是创建不同的nodegroup。实际应用中，只需要将不同namespace的Quota和对应nodegroup的资源匹配，即可满足不同应用的计算资源需求。 比如，application-a 需要 8core16g的资源，application-b 需要 8core32g的资源那么对应的ResourceQuota 可以分别配置如下。
 
-```
+```yaml
 # for application a
 kubectl create ns namespace-a
 cat <<EOF | kubectl apply -n namespace-a -f -
@@ -102,9 +102,9 @@ spec:
 EOF
 ```
 
-配置完quota后，在应用和nodegroup级别分别打上对应的亲和性标签。其中， nodegroup上需要的亲和性配置
+配置完quota后，还需要在应用和 nodegroup 上做相应的配置。其中， nodegroup上需要添加对应的标签。
 
-```
+```yaml
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
@@ -117,20 +117,19 @@ managedNodeGroups:
     type: m5.2xlarge
     tags:
      app/team: application-b
-
 ```
 
-对于应用A的deployment需要添加的亲和性配置
+对于应用b的deployment需要添加相应的节点选择器来选中上述节点组中的节点。
 
-```
+```yaml
   namespace: namespace-b
   nodeSelector:
     app/team: application-b
 ```
 
-对于应用a来说，配置类似，在此就不展开赘述了。如果希望更近一步在node侧做进一步限制的话，可以额外添加如下配置：
+对于应用a来说，配置类似，在此就不展开赘述了。如果希望在node侧做进一步限制的话，可以额外添加如下配置：
 
-````在
+````yaml
 # 在node上的配置
 $ kubectl taint nodes node1 app/team=application-a:NoSchedule
 
@@ -152,7 +151,7 @@ spec:
 
 #### 2.2 场景2:  负载不稳定，涉及到节点的自动伸缩
 
-在场景2中，由于负载的不稳定，导致集群中工作负载（Pod）和底层的工作节点（EC2）会出现波动，那么如何使得业务容器的扩缩容和其底层工作节点得到匹配便是最主要的挑战。场景2本质上是场景1方案2的一个扩展，我们不仅需要为不同的应用配置不同nodegroup，还需节点扩展工具能够支持基于namespace/业务应用进行扩容。虽然在kubernetes中并没有一个工具直接支持namespace级别的扩容，但是基于目前主流工具对于亲和性的支持，我们可以实现类似的功能。具体来讲
+在场景2中，由于负载的不稳定，导致集群中工作负载（Pod）和底层的工作节点（EC2）会出现波动，那么如何使得业务容器的扩缩容和其底层工作节点得到匹配便是最主要的挑战。场景2本质上是场景1方案2的一个扩展，我们不仅需要为不同的应用配置不同nodegroup，还需节点扩展工具能够支持基于namespace/业务应用进行扩容。虽然在kubernetes中并没有一个工具直接支持namespace级别的扩容，但是基于目前主流工具对标签的支持，我们可以实现类似的功能。具体来讲
 
 * 基于**Cluster AutoScaler**实现租户资源的定向扩展
 
@@ -160,7 +159,7 @@ spec:
 
     * 比如如下两个nodegroup，分别对应**app/team: application-x的标签**
 
-      ```
+      ```yaml
       apiVersion: eksctl.io/v1alpha5
       kind: ClusterConfig
       
@@ -175,18 +174,17 @@ spec:
           labels: {app/team: application-b}
       ```
 
-  * 对于应用来说，创建对应业务应用的deployment文件，设定node selector到上述对应的节点上,
+  * 对于应用来说，创建对应业务应用的deployment文件，设定node selector到上述对应的节点上。
 
-    ~~~yaml
+    ```yaml
     apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: nginx-deployment
     spec
-    ```
       nodeSelector:
             app/team: application-a
-    ~~~
+    ```
 
   * 当对应的应用扩容，但是底层没有节点的时候，CA会依据策略调用nodegroup进行扩容
 
@@ -206,7 +204,7 @@ spec:
 
       * 只需要在provioner配置类似如下的标签
 
-        ```
+        ```yaml
         ...
           requirements:
           - key: company.com/team
@@ -214,9 +212,9 @@ spec:
         ...
         ```
 
-        那么当应用中，包含如下亲和性标签的时候，那么对应启动的EC2节点都会被打上 team-a相关的标签，后续对应的应用也只会落在存在team-a相关标签的EC2-资源池中
+        那么当应用的节点选择器中包含如下标签的时候，对应启动的EC2节点都会被打上 team-a相关的标签，后续对应的应用也只会落在存在team-a相关标签的EC2-资源池中
 
-        ```
+        ```yaml
           nodeSelector:
             company.com/team: team-a
         ```
@@ -275,7 +273,7 @@ ip-10-1-4-89.us-west-2.compute.internal    Ready    <none>   46m   v1.23.9-eks-b
 
 首先查看示例代码
 
-```
+```yaml
 [ec2-user@ip-10-1-1-239 blog]$ cat multi-tenant/yaml/nginx/nginx-dp.yaml 
 apiVersion: apps/v1
 kind: Deployment
@@ -323,7 +321,7 @@ Namespace:      namespace-c
 
 可以看到，因为集群中并没有application-c label的节点，故一直无法启动。那么接下来我们实验把上面nginx-dp的匹配选项改为app/team=application-b，namespace也改为application-b，并且把节点数量扩展到5个，如下图所示
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -403,7 +401,7 @@ application-b-provisioner   17s
 
 两个provisioner的主要区别，主要为下面的taint对应的应用部门不同，即工作节点不同
 
-```
+```yaml
 kind: Provisioner
 metadata:
   name: application-x-provisioner
@@ -422,7 +420,7 @@ spec:
 
 该provisioner生成的节点都具有**app/team=application-x** label和 污点，应用如果想落在对应的机器，需要有对应的toleration和nodeselector才可。继续查看nginx的代码，我们可以看到其对应的toleration和资源的配置。
 
-```
+```yaml
 $ cat nginx-dp-kpt.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -516,7 +514,7 @@ kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-
 
 部署策略
 
-```
+```yaml
 cat <<EOF | kubectl apply -f -
 apiVersion: constraints.gatekeeper.sh/v1beta1
 kind: K8sContainerRequests
@@ -553,7 +551,7 @@ $ kubectl logs gatekeeper-controller-manager-dcb9c7fff-nxmn6 -ngatekeeper-system
 
 修改应用为有request值，在multi-tenant/yaml/nginx/nginx-dp-no-request.yaml 最下方加入如下字段
 
-````
+````yaml
 resources:
   requests:
    memory: "2048Mi"
@@ -575,7 +573,7 @@ nginx-deployment-no-request-6f7fdfd875-2f6kv   1/1     Running   0          14s
 
 部署webhook
 
-```
+```yaml
 cat <<EOF | kubectl apply -f -
 apiVersion: mutations.gatekeeper.sh/v1beta1
 kind: Assign
@@ -603,7 +601,7 @@ EOF
 
 其中写明了，如果是部署在namespace-a的应用，那么会通过webhook注入如下的标签, 当然也可以注入其他选项，如toleration等。
 
-```
+```yaml
 nodeSelector
  app/team: "application-a"
 ```
@@ -657,7 +655,7 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 通过以上的方案的展开，我们了解到了在单集群多namespace环境下实现租户之间资源的隔离的几种常见划分和对应手段，其可以为客户在制定对应策略时提供基本的参考
 
-同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到很多进入多租户深水区的客户往往采用了上述两种方式的结合，即他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace的形态进行划分，然后在进行逐步的演进
+同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到很多进入多租户深水区的客户往往采用了上述两种方式的结合，即他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace的形态进行划分，然后再进行逐步的演进
 
 最后，附上相关内容的简要总结
 
