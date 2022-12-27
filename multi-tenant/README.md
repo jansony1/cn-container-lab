@@ -1,24 +1,48 @@
-## 窝塌之下可容他人酣睡 一 EKS多租户集群节点管理浅谈
+## 窝塌之下可容他人酣睡 一 EKS多租户管理浅谈之计算资源篇
 
 ### 1.前言
 
-现如今，随着用户对于容器化掌握的越来越成熟，越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选平台。这个时候，经常会有一个问题摆在用户的面前：是应该对于不同的业务应用提供不同的集群，还是基于kubernetes原生的namespaces进行划分？
+现如今，随着用户对于容器化技术掌握的越来越成熟，相应的越来越多的应用被进行了基于容器的现代化构建，其中Amazon EKS又是其中的首选支撑平台。在实际走访中发现，对于Infra或者容器平台的责任人来说，有一类问题经常会被反复探讨：为了保障各个应用都能够稳定的运行，该应用什么样的隔离保障措施，都有什么样的资源需要进行隔离，相应的优劣势是什么？从整体上来说，EKS/Kubernetes本身不存在多租户相关的内置资源对象，不过其生态中存在着两种可以采用的隔离措施，借助这些隔离措施可以实现多租户的效果, 其简单的示意图如下所示：
 
-如果选择不同的集群对应不同的应用(如下图所示)，这种独占（dedicated）的模式可以有效避免吵闹的邻居问题，另外从运维角度来说可以相对简化集群内运维和策略的复杂度。但是同时其也带来了很多挑战，比如如何确定切分应用的粒度，如何对多集群进行运维管理，如何更高的提高每个集群的利用率，如何处理跨集群应用调用以及相应的链路追踪等等。
+### <img src="../multi-tenant-compute/image/mode.png" style="zoom:50%;" />
 
-<img src="../multi-tennat/image/dedicated.png" style="zoom:50%;" />
+* “软”隔离（上图左）：即多个应用运行在同一个集群，利用namespace及相关策略进行资源隔离
+  * 优点：
+    * EKS单集群可支撑上千节点的工作负载，单集群可减少多控制平面的花费
+    * 资源利用率相对较高
+    * 省去了多集群管理的复杂工作
+  * 缺点：
+    * 需要考虑集群内各种资源隔离的配置
+    * 需要考虑单集群运维对各个应用团队的影响
+* “硬”隔离（上图右）：即不同的应用运行在不同的集群之中，甚至不同的vpc之中，实现“物理”意义上的隔离
+  * 优点：
+    * 没有吵闹的邻居影响
+    * 不需要配置复杂的集群内策略https://quip-amazon.com/HD2TAPUEE6kB/Hudi-Issue-Track
+  * 缺点：
+    * 控制平面会产生额外的花费
+    * 需要设计集群切分的粒度
+    * 资源利用率相对较低
+    * 跨集群访问和相应的监控较为复杂
 
-如果基于单集群多namespace的角度来看（如下图），首先感谢Amazon EKS[最近的升级](https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/)， EKS控制平面现在有了基于集群指标，如Cluster Size，等的自动扩容机制，目前EKS单集群可以支持多达数千个以上的工作节点。基于此，单一集群便可支撑客户较大规模的应用部署，同时在运维角度，单一集群的管理也相对更为简单。但是，由于多应用存在于同一集群，namespace级别的隔离又是软限制，我们需要实施很多集群内的租户隔离措施，如基于namespace的网络策略，基于节点的资源隔离措施，还需要考虑集群升级等变动发生时对于不同应用部门协调所需要的额外工作量等等。
+对于“硬”隔离来说，其在网络层面，计算资源等层面都是默认“物理”隔离，因此在kubernetes层面并不需要太多关注。对于“软”隔离来说，应用处于同一集群之中，计算资源，网络资源，存储资源等默认都是可通可达，那么如何利用云原生和AWS服务处理“软”隔离便是本系列的探讨重点。对于“软”隔离策略来说，其主要的关注点如下
 
-<img src="../multi-tennat/image/shared.png" style="zoom:50%;" />
+* 计算资源隔离
+* 网络隔离
+* 存储隔离
+* 服务等级（SLA）
+* 租户计费
+* 不同
+* 其他
 
-在Amazon EKS上，控制平面由AWS进行托管，基于职责分离的原则，用户更需要关注的为工作节点和相关网络的管理。因为独占模式相对简单，网络隔离会在后续的文章专门探讨，本文主要探讨的话题集中在如何在**单集群多namespace的情况下实现集群工作节点的合理且安全的利用**
+在本文中主要集中对于“软”隔离策略下计算资源隔离的讨论，其他内容会在后续的文章进行展开
 
 ### 2. 方案概述
 
-#### 2.1 场景1：流量稳定，不涉及到工作节点的自动伸缩
+考虑计算资源隔离，其主要涉及的内容为：Namespace隔离，底层计算资源的隔离，ServiceAccount细分以及对应资源的隔离。对应于以上考量点，我们主要分为如下两个场景进行展开讨论。
 
-对于企业内部应用或者流量较为平稳的应用来说，基于隔离的程度不同，通常情况下我们采用的策略为两种
+#### 2.1 场景1：负载稳定，不涉及到工作节点的自动伸缩
+
+对于企业内部应用或者负载较为平稳的应用来说，对隔离程度的需求不同，通常情况下我们采用的策略为两种
 
 1. namespace级别的资源限制
 2. 指定工作节点+namespace级别的资源限制
@@ -27,7 +51,7 @@
 
 可以根据各个应用部门申请的资源额度，设置对应namespace的资源限额（Quota）。然后统计出集群中整体对于资源的申请情况，从而确定集群工作节点所需要的数量。配置如下：
 
-```
+```yaml
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -40,13 +64,13 @@ spec:
     limits.memory: 2Gi
 ```
 
-如果需要把对应的Quota应用到指定的Namespace只需要，`kubectl xx.yaml --namespace = target-namespace`即可。其中在示例中，大家可以看到limit的值是request的值的两倍，这样设置是为了让集群内的资源利用更高，客户可以根据自身的波动情况进行对应改造。
+如果需要把对应的Quota应用到指定的Namespace只需要，`kubectl xx.yaml --namespace = target-namespace`即可。在示例中，大家可以看到limit的值是request的值的两倍，这样设置是为了让集群内的资源利用更高，客户可以根据自身的波动情况进行对应改造。
 
 ##### 方案2
 
-相对于方案1来说，我们需要为不同的业务应用做资源隔离，也就是创建不同的nodegroup。这时候计算集群内对于计算资源的需求时，使得不同namespace的Quota和对应nodegroup的资源匹配即可。 比如，application-a 需要 8core16g的资源，application-b 需要 8core32g的资源那么对应的ResourceQuota 可以分别配置成如下。
+相对于方案1来说，我们需要为不同的业务应用做资源隔离，也就是创建不同的nodegroup。实际应用中，只需要将不同namespace的Quota和对应nodegroup的资源匹配，即可满足不同应用的计算资源需求。 比如，application-a 需要 8core16g的资源，application-b 需要 8core32g的资源那么对应的ResourceQuota 可以分别配置如下。
 
-```
+```yaml
 # for application a
 kubectl create ns namespace-a
 cat <<EOF | kubectl apply -n namespace-a -f -
@@ -78,9 +102,9 @@ spec:
 EOF
 ```
 
-配置完quota后，在应用和nodegroup级别分别打上对应的亲和性标签。其中， nodegroup上需要的亲和性配置
+配置完quota后，还需要在应用和 nodegroup 上做相应的配置。其中， nodegroup上需要添加对应的标签。
 
-```
+```yaml
 apiVersion: eksctl.io/v1alpha5
 kind: ClusterConfig
 
@@ -92,21 +116,20 @@ managedNodeGroups:
   - name: application-a-ng
     type: m5.2xlarge
     tags:
-    	app/team: application-b
-
+     app/team: application-b
 ```
 
-对于应用A的deployment需要添加的亲和性配置
+对于应用b的deployment需要添加相应的节点选择器来选中上述节点组中的节点。
 
-```
+```yaml
   namespace: namespace-b
   nodeSelector:
     app/team: application-b
 ```
 
-对于应用a来说，配置类似，在此就不展开赘述了。如果希望更近一步在node侧做进一步限制的话，可以额外添加如下配置：
+对于应用a来说，配置类似，在此就不展开赘述了。如果希望在node侧做进一步限制的话，可以额外添加如下配置：
 
-````在
+````yaml
 # 在node上的配置
 $ kubectl taint nodes node1 app/team=application-a:NoSchedule
 
@@ -116,7 +139,7 @@ kind: Pod
 ```
 spec:
   containers:
-	```
+ ```
   tolerations:
   - key: "app/team"
     operator: "Equal"
@@ -124,11 +147,11 @@ spec:
     effect: "NoSchedule"
 ````
 
-在eksctl中也有通过脚本统一为nodegroup中节点打标签的配置，可[参考](https://eksctl.io/usage/nodegroup-taints/)。 
+在eksctl中也有通过脚本统一为nodegroup中节点打标签的配置，可[参考](https://eksctl.io/usage/nodegroup-taints/)。
 
-#### 2.2 场景2:  流量不稳定，涉及到节点的自动伸缩
+#### 2.2 场景2:  负载不稳定，涉及到节点的自动伸缩
 
-在场景2中，由于流量的不稳定，导致集群中工作负载（Pod）和底层的工作节点（EC2）会出现波动，那么如何使得业务容器的扩缩容和其底层工作节点得到匹配便是最主要的挑战。场景2本质上是场景1方案2的一个扩展，我们不仅需要为不同的应用配置不同nodegroup，还需节点扩展工具能够支持基于namespace/业务应用进行扩容。虽然在kubernetes中并没有一个工具直接支持namespace级别的扩容，但是基于目前主流工具对于亲和性的支持，我们可以实现类似的功能。具体来讲
+在场景2中，由于负载的不稳定，导致集群中工作负载（Pod）和底层的工作节点（EC2）会出现波动，那么如何使得业务容器的扩缩容和其底层工作节点得到匹配便是最主要的挑战。场景2本质上是场景1方案2的一个扩展，我们不仅需要为不同的应用配置不同nodegroup，还需节点扩展工具能够支持基于namespace/业务应用进行扩容。虽然在kubernetes中并没有一个工具直接支持namespace级别的扩容，但是基于目前主流工具对标签的支持，我们可以实现类似的功能。具体来讲
 
 * 基于**Cluster AutoScaler**实现租户资源的定向扩展
 
@@ -136,7 +159,7 @@ spec:
 
     * 比如如下两个nodegroup，分别对应**app/team: application-x的标签**
 
-      ```
+      ```yaml
       apiVersion: eksctl.io/v1alpha5
       kind: ClusterConfig
       
@@ -151,18 +174,17 @@ spec:
           labels: {app/team: application-b}
       ```
 
-  * 对于应用来说，创建对应业务应用的deployment文件，设定node selector到上述对应的节点上,
+  * 对于应用来说，创建对应业务应用的deployment文件，设定node selector到上述对应的节点上。
 
-    ~~~yaml
+    ```yaml
     apiVersion: apps/v1
     kind: Deployment
     metadata:
       name: nginx-deployment
     spec
-    ```
       nodeSelector:
             app/team: application-a
-    ~~~
+    ```
 
   * 当对应的应用扩容，但是底层没有节点的时候，CA会依据策略调用nodegroup进行扩容
 
@@ -178,11 +200,11 @@ spec:
 
       * 其本质跟基于CA的定向扩展原理相同，不同的provisioner对应不同的资源池，应用通过亲和性标签从而触发对应资源池的扩展。
 
-    * 单provisioner模式 (https://karpenter.sh/v0.16.3/tasks/scheduling/)
+    * 单provisioner模式 (<https://karpenter.sh/v0.16.3/tasks/scheduling/>)
 
       * 只需要在provioner配置类似如下的标签
 
-        ```
+        ```yaml
         ...
           requirements:
           - key: company.com/team
@@ -190,9 +212,9 @@ spec:
         ...
         ```
 
-        那么当应用中，包含如下亲和性标签的时候，那么对应启动的EC2节点都会被打上 team-a相关的标签，后续对应的应用也只会落在存在team-a相关标签的EC2-资源池中
+        那么当应用的节点选择器中包含如下标签的时候，对应启动的EC2节点都会被打上 team-a相关的标签，后续对应的应用也只会落在存在team-a相关标签的EC2-资源池中
 
-        ```
+        ```yaml
           nodeSelector:
             company.com/team: team-a
         ```
@@ -251,7 +273,7 @@ ip-10-1-4-89.us-west-2.compute.internal    Ready    <none>   46m   v1.23.9-eks-b
 
 首先查看示例代码
 
-```
+```yaml
 [ec2-user@ip-10-1-1-239 blog]$ cat multi-tenant/yaml/nginx/nginx-dp.yaml 
 apiVersion: apps/v1
 kind: Deployment
@@ -299,7 +321,7 @@ Namespace:      namespace-c
 
 可以看到，因为集群中并没有application-c label的节点，故一直无法启动。那么接下来我们实验把上面nginx-dp的匹配选项改为app/team=application-b，namespace也改为application-b，并且把节点数量扩展到5个，如下图所示
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -318,7 +340,7 @@ spec:
                 - application-b
 ```
 
-> 需要注意的是，默认情况下基于nodegroup自动发现的逻辑，CA只会调整ASG中desired的机器数量 ，会遵循nodegroup配置的min和max；所以如果我们没有在创建nodegroup显示配置的话，那这这一步pod的启动会被卡住。 
+> 需要注意的是，默认情况下基于nodegroup自动发现的逻辑，CA只会调整ASG中desired的机器数量 ，会遵循nodegroup配置的min和max；所以如果我们没有在创建nodegroup显示配置的话，那这这一步pod的启动会被卡住。
 
 查看对应的pod状况
 
@@ -365,7 +387,7 @@ kubectl delete deployment nginx-deployment -nnamespace-b
 制作provisioner，本环节将会分别生成application-a-provisioner和application-b-provisioner，分别负责应用a和应用b的计算资源需求。执行下述操作生成provisioner，注意在执行前把**${CLUSTER_NAME}**换成自己的
 
 ```
-$ kubectl apply -f multi-tenant/yaml/provisioner/
+kubectl apply -f multi-tenant/yaml/provisioner/
 ```
 
 我们可以看到对应的两个provisioner已经生成
@@ -379,7 +401,7 @@ application-b-provisioner   17s
 
 两个provisioner的主要区别，主要为下面的taint对应的应用部门不同，即工作节点不同
 
-```
+```yaml
 kind: Provisioner
 metadata:
   name: application-x-provisioner
@@ -398,7 +420,7 @@ spec:
 
 该provisioner生成的节点都具有**app/team=application-x** label和 污点，应用如果想落在对应的机器，需要有对应的toleration和nodeselector才可。继续查看nginx的代码，我们可以看到其对应的toleration和资源的配置。
 
-```
+```yaml
 $ cat nginx-dp-kpt.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -432,7 +454,7 @@ spec:
 执行部署
 
 ```
-$ kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-kpt.yaml
+kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-kpt.yaml
 ```
 
 观察执行结果
@@ -450,14 +472,14 @@ nginx-deployment-kpt-585c679d5d-p54h5   1/1     Running   0          96s
 可以看到，所有pod在100s内完成了就绪，查看karpenter的日志，我们发现其遍历了多个provisioner，并从中选择了匹配的provisioner-a，且**自动合并**了我们多个pod请求，从而在列表中选择了较大的机型进行启动，避免了多次调用AWS API，以及时间的消耗。
 
 ```
-2022-10-04T07:12:17.207Z	INFO	controller.provisioning	Found 3 provisionable pod(s)	{"commit": "5d4ae35-dirty"}
-2022-10-04T07:12:17.207Z	INFO	controller.provisioning	Computed 1 new node(s) will fit 3 pod(s)	{"commit": "5d4ae35-dirty"}
-2022-10-04T07:12:17.207Z	INFO	controller.provisioning	Launching node with 3 pods requesting {"cpu":"4594m","memory":"6Gi","pods":"6"} from types m5.2xlarge	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.389Z	DEBUG	controller.provisioning.cloudprovider	Discovered security groups: [sg-049758300817976ce]	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.393Z	DEBUG	controller.provisioning.cloudprovider	Discovered kubernetes version 1.23	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.428Z	DEBUG	controller.provisioning.cloudprovider	Discovered ami-050d93f2ea83da19d for query "/aws/service/eks/optimized-ami/1.23/amazon-linux-2/recommended/image_id"	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:17.588Z	DEBUG	controller.provisioning.cloudprovider	Created launch template, Karpenter-test-eks-1-4579713353214019755	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
-2022-10-04T07:12:20.650Z	INFO	controller.provisioning.cloudprovider	Launched instance: i-035a7efc520610dc7, hostname: ip-10-1-4-148.us-west-2.compute.internal, type: m5.2xlarge, zone: us-west-2a, capacityType: on-demand	{"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.207Z INFO controller.provisioning Found 3 provisionable pod(s) {"commit": "5d4ae35-dirty"}
+2022-10-04T07:12:17.207Z INFO controller.provisioning Computed 1 new node(s) will fit 3 pod(s) {"commit": "5d4ae35-dirty"}
+2022-10-04T07:12:17.207Z INFO controller.provisioning Launching node with 3 pods requesting {"cpu":"4594m","memory":"6Gi","pods":"6"} from types m5.2xlarge {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.389Z DEBUG controller.provisioning.cloudprovider Discovered security groups: [sg-049758300817976ce] {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.393Z DEBUG controller.provisioning.cloudprovider Discovered kubernetes version 1.23 {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.428Z DEBUG controller.provisioning.cloudprovider Discovered ami-050d93f2ea83da19d for query "/aws/service/eks/optimized-ami/1.23/amazon-linux-2/recommended/image_id" {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:17.588Z DEBUG controller.provisioning.cloudprovider Created launch template, Karpenter-test-eks-1-4579713353214019755 {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
+2022-10-04T07:12:20.650Z INFO controller.provisioning.cloudprovider Launched instance: i-035a7efc520610dc7, hostname: ip-10-1-4-148.us-west-2.compute.internal, type: m5.2xlarge, zone: us-west-2a, capacityType: on-demand {"commit": "5d4ae35-dirty", "provisioner": "application-a-provisioner"}
 ```
 
 #### 3.3 利用Gatekeeper实现namespace级别的管控和注入
@@ -487,12 +509,12 @@ gatekeeper-system   gatekeeper-controller-manager-dcb9c7fff-nxmn6   1/1     Runn
 安装插件
 
 ```
-$ kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-library/master/library/general/containerrequests/template.yaml
+kubectl apply -f https://raw.githubusercontent.com/open-policy-agent/gatekeeper-library/master/library/general/containerrequests/template.yaml
 ```
 
 部署策略
 
-```
+```yaml
 cat <<EOF | kubectl apply -f -
 apiVersion: constraints.gatekeeper.sh/v1beta1
 kind: K8sContainerRequests
@@ -512,7 +534,7 @@ EOF
 其中限制了部署应用必须显示指定request值以及相应的最大值，否则部署出错。 接下来部署测试应用
 
 ```
-$ kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-no-request.yaml
+kubectl apply -f multi-tenant/yaml/nginx/nginx-dp-no-request.yaml
 ```
 
 查看状态
@@ -529,14 +551,14 @@ $ kubectl logs gatekeeper-controller-manager-dcb9c7fff-nxmn6 -ngatekeeper-system
 
 修改应用为有request值，在multi-tenant/yaml/nginx/nginx-dp-no-request.yaml 最下方加入如下字段
 
-````
+````yaml
 resources:
   requests:
-  	memory: "2048Mi"
-  	cpu: "1500m"
+   memory: "2048Mi"
+   cpu: "1500m"
   limits:
-  	memory: "2048Mi"
-  	cpu: "1500m"
+   memory: "2048Mi"
+   cpu: "1500m"
 ````
 
 重新部署，发现容器启动正常
@@ -551,7 +573,7 @@ nginx-deployment-no-request-6f7fdfd875-2f6kv   1/1     Running   0          14s
 
 部署webhook
 
-```
+```yaml
 cat <<EOF | kubectl apply -f -
 apiVersion: mutations.gatekeeper.sh/v1beta1
 kind: Assign
@@ -577,14 +599,14 @@ spec:
 EOF
 ```
 
-其中写明了，如果是部署在namespace-a的应用，那么会通过webhook注入如下的标签, 当然也可以注入其他选项，如toleration等。 
+其中写明了，如果是部署在namespace-a的应用，那么会通过webhook注入如下的标签, 当然也可以注入其他选项，如toleration等。
 
-```
+```yaml
 nodeSelector
-	app/team: "application-a"
+ app/team: "application-a"
 ```
 
-部署应用 
+部署应用
 
 ```
 ## 发现除了三个跑在已有application-a-ng上的pod启动外，其他pod因为注入了selector无法调度
@@ -631,27 +653,28 @@ nginx-deployment-no-selector-6f7fdfd875-zk9hd   1/1     Running   0          5m1
 
 ### 4. 总结
 
-#### 通过以上的方案的展开，我们了解到了在单集群多namespace环境下实现租户之间资源的隔离的几种常见划分和对应手段，其可以为客户在制定对应策略时提供基本的参考。
+通过以上的方案的展开，我们了解到了在单集群多namespace环境下实现租户之间资源的隔离的几种常见划分和对应手段，其可以为客户在制定对应策略时提供基本的参考
 
-##### 同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到了很多进入多租户深水区的客户往往采用了上述两种方式的结合，他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace 的形态进行划分，然后在进行逐步的演进。
+同时我们在与各位优秀的客户交流的过程中感受到并没有一概而论的方案去应对多租户场景下，应用到底应该是按集群级别进行隔离，还是namespace级别进行隔离。在过往的经历中，我们看到很多进入多租户深水区的客户往往采用了上述两种方式的结合，即他们通常会对SLA要求等级比较高的应用进行单集群的部署，SLA相对较低的应用进行单集群namespace级别的隔离。所以采用哪种方式不能一概而论，取决于客户当前所属的阶段，应用的大小和多少，以及相关应用SLA的等级来划分。我们通常建议客户刚起步时，可以基于单集群多namespace的形态进行划分，然后再进行逐步的演进
 
-最后，附上相关的总结
+最后，附上相关内容的简要总结
 
-### <img src="../multi-tennat/image/summary.png" style="zoom:50%;" />
+### <img src="../multi-tenant-compute/image/summary.png" style="zoom:50%;" />
+
+上图缩写说明
+* NS: namespace
+* NG: nodegroup
+* KPT: karpenter
+* CA: cluster autoscaler
+
+在后续的文章中，我们将会从网络，存储，以及框架等方面展开近一步的探讨。
 
 ### 参考文档
 
-EKS enhancement: https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/
+EKS enhancement: <https://aws.amazon.com/cn/blogs/containers/amazon-eks-control-plane-auto-scaling-enhancements-improve-speed-by-4x/>
 
-Cluster Autoscaler: https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-are-expanders
+Cluster Autoscaler: <https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-are-expanders>
 
-Karpenter： https://karpenter.sh/v0.16.3/tasks/scheduling/
+Karpenter： <https://karpenter.sh/v0.16.3/tasks/scheduling/>
 
-Gatekeeper：https://github.com/open-policy-agent/gatekeeper
-
-
-
-
-
-
-
+Gatekeeper：<https://github.com/open-policy-agent/gatekeeper>
